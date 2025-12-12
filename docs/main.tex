@@ -1,0 +1,281 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath, amssymb, amsthm}
+\usepackage{geometry}
+\geometry{a4paper, margin=2.5cm}
+
+% Notations du projet
+\newcommand{\Uone}{\mathcal{U}^1} % Incertitude distances
+\newcommand{\Utwo}{\mathcal{U}^2} % Incertitude poids
+\newcommand{\lij}{l_{ij}}
+\newcommand{\wi}{w_{i}}
+
+\title{Projet de Partitionnement Robuste}
+\author{Maël Verbois}
+\date{2025-2026}
+
+\begin{document}
+\maketitle
+\section{Modélisation papier}
+\subsection{Rappel des notations et du problème}
+
+Soit $G=(V,E)$ un graphe non orienté. Pour chaque arête $\{i,j\} \in E$, une distance $l_{ij}$ est donnée. Pour chaque sommet $i \in V$, un poids $w_i$ est associé.
+L'objectif est de partitionner les sommets $V$ en au plus $K$ sous-ensembles (parties) disjoints $V_1, \dots, V_K$ tels que le poids total de chaque partie ne dépasse pas $B$. On cherche à minimiser la somme des distances des arêtes dont les deux extrémités appartiennent à la même partie.
+
+\subsection{Modélisation par Programme Linéaire en Nombres Entiers (PLNE)}
+
+Nous introduisons les variables de décision suivantes :
+\begin{itemize}
+    \item $x_{ik} \in \{0,1\}$ : vaut 1 si le sommet $i \in V$ est assigné à la partie $k \in \{1, \dots, K\}$, 0 sinon.
+    \item $y_{ij} \in \{0,1\}$ : vaut 1 si l'arête $\{i,j\} \in E$ a ses deux extrémités dans la même partie, 0 sinon.
+\end{itemize}
+
+Le problème statique peut être modélisé par le programme linéaire suivant :
+
+\begin{align}
+    \text{Minimiser} \quad & \sum_{\{i,j\} \in E} l_{ij} y_{ij} \label{obj:static} \\
+    \text{Sous contraintes} \quad & \sum_{k=1}^{K} x_{ik} = 1, & \forall i \in V \label{const:assign} \\
+    & \sum_{i \in V} w_i x_{ik} \le B, & \forall k \in \{1, \dots, K\} \label{const:capacity} \\
+    & y_{ij} \ge x_{ik} + x_{jk} - 1, & \forall \{i,j\} \in E, \forall k \in \{1, \dots, K\} \label{const:link} \\
+    & x_{ik} \in \{0,1\}, \quad y_{ij} \in \{0,1\} & \forall i \in V, \forall \{i,j\} \in E, \forall k \label{const:integrality}
+\end{align}
+
+\subsubsection*{Explication des contraintes}
+\begin{enumerate}
+    \item La contrainte \eqref{const:assign} assure que chaque sommet est affecté à exactement une partie.
+    \item La contrainte \eqref{const:capacity} assure que la somme des poids des sommets d'une partie $k$ ne dépasse pas la capacité $B$.
+    \item La contrainte \eqref{const:link} lie les variables de sommets et d'arêtes. Si les sommets $i$ et $j$ sont tous deux dans la partie $k$, alors $x_{ik}=1$ et $x_{jk}=1$. La contrainte devient $y_{ij} \ge 1 + 1 - 1 = 1$, forçant $y_{ij}$ à 1. Puisque l'objectif est de minimiser une somme à coefficients positifs ($l_{ij} \ge 0$), $y_{ij}$ prendra la valeur 0 si $i$ et $j$ ne sont jamais dans la même partie.
+\end{enumerate}
+
+\subsubsection*{Preuve de la validité de la modélisation}
+% Il faut réecrire cette preuve elle est peu lisible
+Il existe une bijection entre les solutions optimales du problème de partitionnement et celles de ce PLNE.
+\begin{itemize}
+    \item \textbf{Sens direct :} Soit une partition admissible optimale. On fixe $x_{ik}=1$ si $i$ est dans la partie $k$ 0 sinon. Les contraintes \eqref{const:assign} et \eqref{const:capacity} sont satisfaites par définition. Pour chaque arête $\{i,j\}$, si $i$ et $j$ sont dans la même partie, on fixe $y_{ij}=1$, sinon $y_{ij}=0$ cela garantit la contrainte \eqref{const:link} . La valeur de l'objectif correspond exactement à la somme des distances intra-classes d'après la remarque 3 et elle est bien minimum par optimalité de la partition initiale (les solutions admissibles sont des partitions valides cf réciproque).
+    \item \textbf{Sens réciproque :} Soit $(x, y)$ une solution optimale du PLNE. Les $x_{ik}$ définissent une partition valide (chaque sommet est assigné, capacité respectée).
+    La contrainte \eqref{const:link} implique que si $x_{ik}=x_{jk}=1$, alors $y_{ij} \ge 1$. Comme on minimise $\sum l_{ij} y_{ij}$ avec $l_{ij} \ge 0$, on fixera $y_{ij}=0$ si la contrainte ne le force pas à 1. Ainsi, $y_{ij}=1$ si et seulement si $i$ et $j$ sont dans la même partie. L'objectif représente bien le coût de la partition et est donc optimale par optimalité de la solution optimale et le fait que les partitions valides sont des solutions valides d'après le sens direct.
+\end{itemize}
+
+\subsubsection*{Preuve de la compacité}
+
+Une modélisation est dite compacte si le nombre de variables et de contraintes est polynomial en la taille de l'instance.
+\begin{itemize}
+    \item \textbf{Variables :} Il y a $|V| \times K$ variables $x_{ik}$ et $|E|$ variables $y_{ij}$.
+    \item \textbf{Contraintes :} Il y a $|V|$ contraintes d'affectation, $K$ contraintes de capacité, et $|E| \times K$ contraintes de lien.
+\end{itemize}
+Comme le nombre de contraintes dépend de K le problème n'est à priori pas compact.
+Cependant on peut s'intéresser uniquement aux partitions avec des parties non vides et dans ce cas, nous avons $K \le |V|$ (dans le pire des cas chaque sommet correspond à une partie). Le nombre total de variables est en $O(|V|^2 + |E|)$ et le nombre de contraintes est en $O(|E||V|)$. Ces quantités étant polynomiales par rapport à la taille du graphe, la modélisation est compacte.
+
+\subsection{Modélisation du problème robuste}
+
+\subsubsection*{Définition des ensembles d'incertitude}
+
+D'après le sujet, les distances incertaines appartiennent à l'ensemble $\mathcal{U}^1$ défini par les variables de déviation $\delta_{ij}^1$ :
+\[
+\mathcal{U}^1 = \left\{ (l_{ij}^1 = l_{ij} + \delta_{ij}^1 (\hat{l}_i + \hat{l}_j))_{ij\in E} \mid \sum_{\{i,j\} \in E} \delta_{ij}^1 \le L, \quad 0 \le \delta_{ij}^1 \le 3 \quad \forall \{i,j\} \in E \right\}
+\]
+Les poids incertains appartiennent à l'ensemble $\mathcal{U}^2$ défini par les variables de déviation $\delta_{i}^2$:
+\[
+\mathcal{U}^2 = \left\{ (w_{i}^2 = w_{i} (1 + \delta_{i}^2))_{v \in V} \mid \sum_{i \in V} \delta_{i}^2 \le W, \quad 0 \le \delta_{i}^2 \le W_D \quad \forall i \in V \right\}
+\]
+
+\subsubsection*{Programme Robuste}
+
+Le problème robuste consiste à trouver une solution $(x,y)$ réalisable pour \textit{toutes} les réalisations possibles des poids dans $\mathcal{U}^2$, et qui minimise le coût dans le \textit{pire} scénario de distances dans $\mathcal{U}^1$. On se permettra l'abus de notation qui confond les variable robustes avec leur paramétrisation dans les ensembles $\mathcal{U}^1$ et $\mathcal{U}^2$.
+\newpage
+La formulation est la suivante :
+
+\begin{align}
+    \min_{x,y} \quad & \max_{\delta^1 \in \mathcal{U}^1} \sum_{\{i,j\} \in E} \left( l_{ij} + \delta_{ij}^1 (\hat{l}_i + \hat{l}_j) \right) y_{ij} \label{obj:robust} \\
+    \text{Sous contraintes} \quad & \sum_{k=1}^{K} x_{ik} = 1, & \forall i \in V \\
+    & \sum_{i \in V} w_i (1 + \delta_{i}^2) x_{ik} \le B, & \forall k \in \{1, \dots, K\}, \forall \delta^2 \in \mathcal{U}^2 \label{const:robust_cap} \\
+    & y_{ij} \ge x_{ik} + x_{jk} - 1, & \forall \{i,j\} \in E, \forall k \\
+    & x_{ik} \in \{0,1\}, \quad y_{ij} \in \{0,1\}
+\end{align}
+
+\subsection{Résolution par plans coupants et LazyCallback}
+
+\subsubsection*{3.a) Reformulation avec variable épigraphique}
+
+Nous introduisons une variable réelle continue $\eta$ représentant la valeur de l'objectif dans le pire cas.
+
+\begin{align}
+    \text{Minimiser} \quad & \eta \\
+    \text{Sous contraintes} \quad & \eta \ge \sum_{\{i,j\} \in E} \left( l_{ij} + \delta_{ij}^1 (\hat{l}_i + \hat{l}_j) \right) y_{ij}, & \forall \delta^1 \in \mathcal{U}^{1} \label{const:cut_obj} \\
+    & \sum_{i \in V} w_i (1 + \delta_{i}^2) x_{ik} \le B, & \forall k \in \{1, \dots, K\}, \forall \delta^2 \in \mathcal{U}^{2} \label{const:cut_cap} \\
+    & \sum_{k=1}^{K} x_{ik} = 1, & \forall i \in V \\
+    & y_{ij} \ge x_{ik} + x_{jk} - 1, & \forall \{i,j\} \in E, \forall k \\
+    & x_{ik} \in \{0,1\}, \quad y_{ij} \in \{0,1\}, \quad \eta \in \mathbb{R}
+\end{align}
+
+Donc, le problème maitre restreint des plans coupants correspond exactement aux problèmes précédents où l'on remplace $\mathcal{U}^1, \mathcal{U}^2$ par deux sous ensembles finis $\mathcal{U}^{1*}, \mathcal{U}^{2*}$.
+\subsubsection*{3.b) Ensembles initiaux $\mathcal{U}^{1*}$ et $\mathcal{U}^{2*}$}
+
+Pour initialiser l'algorithme de plans coupants, nous choisissons les scénarios du problème statique qui correspond au scénario le plus optimiste.
+\begin{itemize}
+    \item $\mathcal{U}^{1*} = \{ \mathbf{l} \}$, c'est-à-dire le scénario où $\delta_{ij}^1 = 0$ pour tout $\{i,j\} \in E$.
+    \item $\mathcal{U}^{2*} = \{ \mathbf{w} \}$, c'est-à-dire le scénario où $\delta_{i}^2 = 0$ pour tout $i \in V$.
+\end{itemize}
+Ainsi, la première itération du problème maître résout exactement le problème statique défini à la section 2.1.
+
+\subsubsection*{3.c) Sous-problèmes de séparation}
+
+Soit $(\hat{x}, \hat{y}, \hat{\eta})$ une solution optimale courante du problème maître restreint.
+
+\textbf{Sous-problème 1 :}
+Nous cherchons à maximiser le coût total des arêtes sélectionnées en jouant sur les variables d'incertitude $\delta^1$. Comme la partie  $\sum l_{ij} \hat{y}_{ij}$ est constante, cela revient à maximiser le terme de déviation :
+
+\begin{align*}
+    SP1(\hat{y}) = \max_{\delta^1} \quad & \sum_{\{i,j\} \in E} \left( \hat{y}_{ij} (\hat{l}_i + \hat{l}_j) \right) \delta_{ij}^1 \\
+    \text{s.c.} \quad & \sum_{\{i,j\} \in E} \delta_{ij}^1 \le L \\
+    & 0 \le \delta_{ij}^1 \le 3, \quad \forall \{i,j\} \in E
+\end{align*}
+Ce problème est un problème de sac à dos continu. Il peut se résoudre très efficacement (algorithme glouton) en triant les coefficients $\hat{y}_{ij} (\hat{l}_i + \hat{l}_j)$ par ordre décroissant et en saturant les $\delta_{ij}^1$ en suivant cette ordre.
+
+\textbf{Sous-problème 2 :}
+Ce problème se décompose par partie. Pour chaque partie $k \in \{1, \dots, K\}$, nous cherchons le poids total maximal en jouant sur $\delta^2$. Pour une partie $k$ fixée :
+
+\begin{align*}
+    SP2_k(\hat{x}) = \max_{\delta^2} \quad & \sum_{i \in V} \left( w_i \hat{x}_{ik} \right) \delta_{i}^2 \\
+    \text{s.c.} \quad & \sum_{i \in V} \delta_{i}^2 \le W \\
+    & 0 \le \delta_{i}^2 \le W_D, \quad \forall i \in V
+\end{align*}
+Remarque : Le terme constant $\sum w_i \hat{x}_{ik}$ n'intervient pas dans l'optimisation mais sera ajouté au résultat pour vérifier la contrainte $B$. De même que pour SP1, c'est un sac à dos continu résoluble par tri des coefficients $w_i \hat{x}_{ik}$.
+
+\subsubsection*{3.d) Conditions d'optimalité}
+
+Une solution $(\hat{x}, \hat{y}, \hat{\eta})$ du problème maître est optimale pour le problème robuste complet si elle satisfait les conditions suivantes :
+
+\begin{enumerate}
+    \item \textbf{Validité de l'objectif :} La valeur $\hat{\eta}$ (estimation du coût par le maître) est supérieure ou égale au coût réel dans le pire cas identifié par le sous-problème 1.
+    \[
+    \hat{\eta} \ge \sum_{\{i,j\} \in E} l_{ij} \hat{y}_{ij} + SP1(\hat{y})
+    \]
+    \item \textbf{Admissibilité robuste :} Pour chaque partie $k$, le poids total dans le pire cas identifié par le sous-problème 2 respecte la borne $B$.
+    \[
+    \sum_{i \in V} w_i \hat{x}_{ik} + SP2_k(\hat{x}) \le B, \quad \forall k \in \{1, \dots, K\}
+    \]
+\end{enumerate}
+
+Si ces conditions sont remplies, alors $(\hat{x}, \hat{y})$ est une solution réalisable robuste et sa valeur objective est minimale car la valeur du problème maitre est un minorant de la valeur du problème robuste qui est aussi une solution admissible.
+
+\subsubsection*{3.e) Expression des coupes}
+
+Si les conditions ci-dessus ne sont pas remplies, nous générons des coupes à ajouter au problème maître. Soient $\delta^{1*}$ la solution optimale de SP1 et $\delta^{2*, k}$ la solution optimale de SP2 pour la partie $k$.
+
+\begin{itemize}
+    \item \textbf{Coupe d'optimalité :} Si $\hat{\eta} < \sum l_{ij} \hat{y}_{ij} + SP1(\hat{y})$, nous ajoutons la coupe suivante au problème maître (ajout du scénario $\delta^{1*}$ à $\mathcal{U}^{1*}$) :
+    \[
+    \eta \ge \sum_{\{i,j\} \in E} \left( l_{ij} + \delta_{ij}^{1*} (\hat{l}_i + \hat{l}_j) \right) y_{ij}
+    \]
+    
+    \item \textbf{Coupe de faisabilité :} Si pour une partie $k$, $\sum w_i \hat{x}_{ik} + SP2_k(\hat{x}) > B$, nous ajoutons la coupe suivante au problème maître (ajout du scénario $\delta^{2*, k}$ à $\mathcal{U}^{2*}$) :
+    \[
+    \sum_{i \in V} w_i (1 + \delta_{i}^{2*, k}) x_{ik} \le B
+    \]
+\end{itemize}
+
+\subsection{Résolution par dualisation}
+
+\subsubsection*{4.a) Reformulation de l'objectif}
+L'objectif du problème robuste est :
+\[
+\min_{x,y} \max_{\delta^1 \in \mathcal{U}^1} \sum_{\{i,j\} \in E} (l_{ij} + \delta_{ij}^1 (\hat{l}_i + \hat{l}_j)) y_{ij}
+\]
+On la réecrit en deux parties dont une dépend de $\delta^1$:
+\[
+\min_{x,y} \left( \sum_{\{i,j\} \in E} l_{ij} y_{ij} + \max_{\delta^1 \in \mathcal{U}^1} \sum_{\{i,j\} \in E} \delta_{ij}^1 (\hat{l}_i + \hat{l}_j) y_{ij} \right)
+\]
+
+\subsubsection*{4.b) Problème interne lié à $\delta_{ij}^1$}
+Pour des variables $y_{ij}$ fixées, le terme de maximisation correspond au PL suivant (P1) :
+\begin{align*}
+    (P1) \quad \max_{\delta^1} \quad & \sum_{\{i,j\} \in E} \left( (\hat{l}_i + \hat{l}_j) y_{ij} \right) \delta_{ij}^1 \\
+    \text{s.c.} \quad & \sum_{\{i,j\} \in E} \delta_{ij}^1 \le L \\
+    & \delta_{ij}^1 \le 3, \quad \forall \{i,j\} \in E \\
+    & \delta_{ij}^1 \ge 0, \quad \forall \{i,j\} \in E
+\end{align*}
+
+\subsubsection*{4.c) Dualisation de ce problème}
+Associons les variables duales suivantes aux contraintes de (P1) :
+\begin{itemize}
+    \item $\sigma^1 \ge 0$ associée à la contrainte de budget global $\sum \delta_{ij}^1 \le L$.
+    \item $\mu_{ij}^1 \ge 0$ associée à chaque contrainte de borne supérieure $\delta_{ij}^1 \le 3$.
+\end{itemize}
+
+Le problème dual (D1) s'écrit alors :
+\begin{align*}
+    (D1) \quad \min_{\sigma^1, \mu^1} \quad & L \sigma^1 + \sum_{\{i,j\} \in E} 3 \mu_{ij}^1 \\
+    \text{s.c.} \quad & \sigma^1 + \mu_{ij}^1 \ge (\hat{l}_i + \hat{l}_j) y_{ij}, \quad \forall \{i,j\} \in E \\
+    & \sigma^1 \ge 0, \quad \mu_{ij}^1 \ge 0
+\end{align*}
+D'après le théorème de la dualité forte, la valeur optimale de (P1) est égale à celle de (D1). Nous pourrons donc remplacer le "max" dans la fonction objectif globale par ce problème de minimisation.
+\subsubsection*{4.d) Reformulation des contraintes robustes}
+
+La contrainte de capacité pour la partie $k$ doit être satisfaite pour tout scénario de $\mathcal{U}^2$. Cela équivaut à exiger que le poids maximal de la partie $k$ ne dépasse pas $B$ :
+\[
+\max_{\delta^2 \in \mathcal{U}^2} \left( \sum_{i \in V} w_i (1 + \delta_{i}^2) x_{ik} \right) \le B
+\]
+En isolant le terme incertain, on obtient :
+\[
+\sum_{i \in V} w_i x_{ik} + \max_{\delta^2 \in \mathcal{U}^2} \sum_{i \in V} (w_i x_{ik}) \delta_{i}^2 \le B
+\]
+
+\subsubsection*{4.e) Problème interne lié aux variables $\delta_{i}^2$}
+
+Pour une partie $k$ et un vecteur $x$ fixés, le terme de maximisation correspond au problème linéaire (P2$_k$),
+\begin{align*}
+    (P2_k) \quad \max_{\delta^2} \quad & \sum_{i \in V} (w_i x_{ik}) \delta_{i}^2 \\
+    \text{s.c.} \quad & \sum_{i \in V} \delta_{i}^2 \le W \quad & (\text{variable duale } \sigma_k^2)\\
+    & \delta_{i}^2 \le W_i, \quad \forall i \in V \quad & (\text{variable duale } \lambda_{ik}^2) \\
+    & \delta_{i}^2 \ge 0, \quad \forall i \in V
+\end{align*}
+
+\subsubsection*{4.f) Dualisation de ces problèmes}
+ Le problème dual (D2$_k$) s'écrit :
+\begin{align*}
+    (D2_k) \quad \min_{\sigma_k^2, \lambda_{\cdot k}^2} \quad & W \sigma_k^2 + \sum_{i \in V} W_i \lambda_{ik}^2 \\
+    \text{s.c.} \quad & \sigma_k^2 + \lambda_{ik}^2 \ge w_i x_{ik}, \quad \forall i \in V \\
+    & \sigma_k^2 \ge 0, \quad \lambda_{ik}^2 \ge 0
+\end{align*}
+Par le théorème de la dualité forte en PL on peut remplacer le PL par sa dualisation dans le modèle robuste.
+
+\subsubsection*{4.g) Programme Linéaire en Nombres Entiers Final}
+
+En remplaçant les maximisations par les minimisations de leurs problèmes duaux respectifs (théorème de dualité forte de la PL), le problème robuste se réécrit ainsi :
+
+\textbf{Reformulation :}
+L'objectif devient :
+\[
+\min_{x,y} \left( \sum_{\{i,j\} \in E} l_{ij} y_{ij} + \min_{\sigma^1, \mu^1} \left( L \sigma^1 + \sum_{\{i,j\} \in E} 3 \mu_{ij}^1 \right) \right)
+\]
+Les contraintes de capacité robustes deviennent :
+\[
+\sum_{i \in V} w_i x_{ik} + \min_{\sigma_k^2, \lambda_{\cdot k}^2} \left( W \sigma_k^2 + \sum_{i \in V} W_i \lambda_{ik}^2 \right) \le B, \quad \forall k \in \{1, \dots, K\}
+\]
+En regroupant les minimums dans l'objectif et en remplaçant le minimum dans la contrainte robuste par l'existence d'une solution réalisable (ce qui est équivalent). On obtient le programme suivant :
+
+\textbf{Programme Linéaire Mixte compact :}
+
+\begin{align}
+    \text{Min} \quad & \sum_{\{i,j\} \in E} l_{ij} y_{ij} + L \sigma^1 + \sum_{\{i,j\} \in E} 3 \mu_{ij}^1 \\
+    \text{S.c.} \quad & \sum_{k=1}^{K} x_{ik} = 1, \quad \forall i \in V \\
+    & y_{ij} \ge x_{ik} + x_{jk} - 1, \quad \forall \{i,j\} \in E, \forall k \\
+    % Dual Objectif
+    & \sigma^1 + \mu_{ij}^1 \ge (\hat{l}_i + \hat{l}_j) y_{ij}, \quad \forall \{i,j\} \in E \\
+    % Contrainte Robustesse Capacité
+    & \sum_{i \in V} w_i x_{ik} + W \sigma_k^2 + \sum_{i \in V} W_i \lambda_{ik}^2 \le B, \quad \forall k \\
+    % Dual Capacité
+    & \sigma_k^2 + \lambda_{ik}^2 \ge w_i x_{ik}, \quad \forall i \in V, \forall k \\
+    & x_{ik}, y_{ij} \in \{0,1\} \\
+    & \sigma^1, \mu_{ij}^1, \sigma_k^2, \lambda_{ik}^2 \ge 0
+\end{align}
+
+En notant $N=|V|$ (sommets) et $M=|E|$ (arêtes), le modèle comporte exactement :
+\begin{itemize}
+    \item \textbf{Variables :} $2NK + 2M + K + 1$.
+    \item \textbf{Contraintes :} $NK + MK + N + M + K$.
+\end{itemize}
+Comme $K \leq N$, la taille du problème reste polynomiale.
+\end{document}
