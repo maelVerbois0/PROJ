@@ -2,7 +2,7 @@ module RobustGraphData
 
 using LinearAlgebra
 
-export ProblemData, load_instance
+
 
 """
     ProblemData
@@ -24,6 +24,7 @@ struct ProblemData
 
     # Computed Data
     distances::Matrix{Float64}   # Nominal distance matrix l_ij (calculated from coordinates)
+    coordinates::Matrix{Float64}
 end
 
 """
@@ -120,7 +121,15 @@ function load_instance(filename::String)
         end
     end
 
-    return ProblemData(n, K, B, L, W, w_v, W_v, lh, dist_matrix)
+    return ProblemData(n, K, B, L, W, w_v, W_v, lh, dist_matrix, coords)
 end
+
+include("staticResolution.jl")
+include("plotPartition.jl")
+
+export ProblemData
+export load_instance
+export solve_static_problem_direct
+export plot_partition_result
 
 end 
