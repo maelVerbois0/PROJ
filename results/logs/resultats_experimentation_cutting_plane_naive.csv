@@ -1,0 +1,13 @@
+Instance,Status,BestObj,BestBound,Gap,Time,SolutionSize
+10_ulysses_3.tsp,OPTIMAL,136.9953,136.9953,0.0000,1.5830,10
+10_ulysses_6.tsp,OPTIMAL,55.1194,55.1194,0.0000,5.1000,10
+10_ulysses_9.tsp,OPTIMAL,33.2919,33.2919,0.0000,1.5670,10
+14_burma_3.tsp,OPTIMAL,93.3900,93.3900,0.0000,6.2100,14
+14_burma_6.tsp,NOTFOUND,Inf,-Inf,NaN,300.0000,0
+14_burma_9.tsp,NOTFOUND,Inf,-Inf,NaN,300.0000,0
+22_ulysses_3.tsp,OPTIMAL,358.6368,358.6368,0.0000,149.4320,22
+22_ulysses_6.tsp,NOTFOUND,Inf,-Inf,NaN,300.0000,0
+22_ulysses_9.tsp,NOTFOUND,Inf,-Inf,NaN,300.0000,0
+26_eil_3.tsp,NOTFOUND,Inf,-Inf,NaN,300.0000,0
+26_eil_6.tsp,NOTFOUND,Inf,-Inf,NaN,300.0000,0
+26_eil_9.tsp,NOTFOUND,Inf,-Inf,NaN,300.0000,0
