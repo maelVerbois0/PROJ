@@ -1,54 +1,57 @@
-using Plots
-using GraphRecipes
 
 """
-    plot_partition_result(data, partition_map, objective_value)
+plot_result(data, result, instance_name; save_path="")
 
-Visualizes the graph partition solution.
-- Nodes are colored by their partition.
-- Node labels show "Index (Weight)".
-- Title shows the total objective value.
+Visualizes the solution stored in ResultatAlgorithme.
+- Uses `scatter` for high performance (removing edges/labels).
+- Title formatted with Printf to show Instance, Objective, and Gap.
+- Automatically groups colors based on `result.incumbent_solution`.
 """
-function plot_partition_result(data::ProblemData, partition_map::Dict{Int, Int}, objective_value::Float64)
-    # 1. Prepare Plotting Data
-    # Sort partitions into a vector for 1..n
-    node_groups = [partition_map[i] for i in 1:data.n]
-    
-    # Create labels: "Index \n (Weight)"
-    # We use the nominal weights w_v, rounded to 1 decimal place
-    node_labels = [string(i, "\n(", round(data.w_nominal[i], digits=1), ")") for i in 1:data.n]
+function plot_result(data::ProblemData, res::ResultatAlgorithme, instance_name::String; save_path::String="")
 
-    # Extract X and Y coordinates
+    # 1. Format the title using @sprintf for clean precision
+    # Assumes gap is a relative float (e.g., 0.05 for 5%). 
+    # If gap is a percentage (e.g., 5.0), remove the `* 100`.
+    title_str = @sprintf(
+        "%s\nObj: %.2f  |  Gap: %.2f%%", 
+        instance_name, 
+        res.best_obj, 
+        res.gap * 100
+    )
+
+    # 2. Extract coordinates
     xs = data.coordinates[:, 1]
     ys = data.coordinates[:, 2]
 
-    # 2. Setup colors
-    # We can rely on Plots default palette or define specific colors
-    theme(:default)
-
-    # 3. Create the Plot
-    # We use a matrix of ones for adjacency to simulate a complete graph, 
-    # but strictly relies on x,y for positioning.
-    # To reduce visual clutter, we can set linealpha low.
-    adj_matrix = ones(data.n, data.n) - I # Complete graph without self-loops
-
-    p = graphplot(adj_matrix,
-        x = xs,
-        y = ys,
-        names = node_labels,
-        nodecolor = node_groups,      # Color nodes by partition group
-        nodeshape = :circle,
-        nodesize = 0.25,              # Adjust node size
-        fontsize = 10,
-        linecolor = :gray,
-        linealpha = 0.3,              # Faint edges to emphasize nodes
-        linewidth = 1.0,
-        markerstrokewidth = 1,        # Border around nodes
-        color_palette = :Set1         # Distinct colors for partitions
+    # 3. Create the Scatter Plot
+    # We access the partition map via `res.incumbent_solution`
+    p = scatter(
+        xs, ys,
+        group = res.incumbent_solution, # Groups nodes by color based on solution
+        title = title_str,
+        
+        # Visual Styling
+        markersize = 5,
+        markerstrokewidth = 0.5,
+        markerstrokecolor = :black,
+        palette = :Set1,
+        
+        # Clean layout (removing axis, legends, grids)
+        legend = false,
+        grid = false,
+        axis = nothing,
+        border = :none,
+        aspect_ratio = :equal
     )
 
-    # Add title with the cost
-    title!("Total Partition Cost: $(round(objective_value, digits=2))")
+    # 4. Save if path is provided
+    if !isempty(save_path)
+        savefig(p, save_path)
+        println("Plot saved to: $save_path")
+        return
+    end
 
+    # 5. Display
     display(p)
+    return
 end

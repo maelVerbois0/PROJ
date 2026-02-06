@@ -1,66 +1,59 @@
-using JuMP
-using SCIP
-
 
 """
     solve_static_problem_direct(data::ProblemData)
 
 Solves the static partitioning problem
 """
-function solve_static_problem_direct(data::ProblemData)
-    println("Version 1")
-    model = Model(SCIP.Optimizer)
-    
+function solve_static_problem_mip(data::ProblemData; time_limit = 300., env = Gurobi.Env())
+    params = Dict(
+        # 1. Symmetry Breaking
+        "Symmetry"    => 2,
+        "PreSparsify" => 1,
+
+        # 4. Cuts
+        "CliqueCuts"  => 2,
+        "Presolve"    => 2,
+
+        # 5. Tolerance & Time
+        "MIPGap"      => 0.01,
+        "TimeLimit"   => time_limit
+    )
+
+    model = direct_model(Gurobi.Optimizer(env))
+    set_silent(model)
+
+    for (k, v) in params
+        set_optimizer_attribute(model, k, v)
+    end
+   
     n = data.n
     K = data.K
 
+
     # --- Variables ---
     # x[i, k] = 1 if vertex i is in partition k
-    @variable(model, x[1:n, 1:K], Bin)
+    @variable(model, x[1:data.n, 1:data.K], Bin)
     
-    # y[i, j] = 1 if edge {i,j} is strictly inside a partition
-    # We only create variables where j > i to avoid duplicates (undirected graph)
-    @variable(model, y[i=1:n, j=i+1:n], Bin)
-
-    # --- Objective ---
-    # [cite_start]Minimiser sum l_{ij} * y_{ij} [cite: 124]
-    # We iterate i from 1 to n, and j from i+1 to n
-    @objective(model, Min, sum(data.distances[i, j] * y[i, j] for i in 1:n for j in i+1:n))
 
     # --- Constraints ---
 
     # 1. Assignment (Eq 2): Each vertex i assigned to exactly one partition k
     # [cite_start]"sum_{k=1}^K x_{ik} = 1" [cite: 125]
-    for i in 1:n
-        @constraint(model, sum(x[i, k] for k in 1:K) == 1)
+    for i in 1:data.n
+        @constraint(model, sum(x[i, k] for k in 1:data.K) == 1)
     end
 
     # 2. Capacity (Eq 3): Sum of weights in partition k <= B
     # [cite_start]"sum_{i in V} w_i x_{ik} <= B" [cite: 125]
-    for k in 1:K
-        @constraint(model, sum(data.w_nominal[i] * x[i, k] for i in 1:n) <= data.B)
+    for k in 1:data.K
+        @constraint(model, sum(data.w_nominal[i] * x[i, k] for i in 1:data.n) <= data.B)
     end
 
-    # 3. Edge Linking (Eq 4): y_{ij} >= x_{ik} + x_{jk} - 1
-    # [cite_start]"y_{ij} >= x_{ik} + x_{jk} - 1" [cite: 125]
-    for i in 1:n
-        for j in i+1:n
-            for k in 1:K
-                # We can access y[i,j] directly now
-                @constraint(model, y[i, j] >= x[i, k] + x[j, k] - 1)
-            end
-        end
-    end
 
-    #Basic symmetry breaking
-    for i in 1:data.n
-        for k in (i+1):data.K
-             fix(x[i, k], 0; force=true)
-        end
-    end
-
-    #Force Vertex 1 to Partition 1
-    fix(x[1, 1], 1; force=true)
+    @objective(model, Min, 1/2 * 
+        sum(data.distances[i, j] * x[i, k] * x[j, k] 
+            for i in 1:data.n, j in 1:data.n, k in 1:data.K)
+    )
 
     # --- Solve ---
     optimize!(model)
@@ -73,7 +66,7 @@ function solve_static_problem_direct(data::ProblemData)
         
         # Build a simple dictionary for the partition map
         # partition_map[i] = k
-        partition_map = Dict{Int, Int}()
+        partition_map = zeros(Int,n)
         for i in 1:n
             for k in 1:K
                 if value(x[i, k]) > 0.5
@@ -82,99 +75,49 @@ function solve_static_problem_direct(data::ProblemData)
             end
         end
 
-        return status, obj_val, partition_map
+        return ResultatAlgorithme(
+                "OPTIMAL", 
+                objective_value(model),
+                objective_bound(model),
+                0.,
+                solve_time(model),
+                partition_map
+                )
     else
-        return status, Inf, Dict()
-    end
-end
-
-using JuMP, SCIP
-
-"""
-    solve_static_warm_started(data::ProblemData)
-
-1. Runs the geometric heuristic to find a good initial partition.
-2. Initializes the SCIP exact model.
-3. 'Warm Starts' SCIP by feeding the heuristic solution.
-4. Solves the exact model to prove optimality.
-"""
-function solve_static_warm_started(data::ProblemData)
-    # --- Step 1: Run Heuristic ---
-    println("Running Heuristic...")
-    h_status, h_cost, h_partition = solve_geometric_heuristic(data)
-    
-    if h_status != "FEASIBLE"
-        println("Heuristic failed to find a feasible solution. Starting cold.")
-        h_partition = Dict{Int, Int}() # Empty dict
-    else
-        println("Heuristic found solution with cost: $h_cost")
-    end
-
-    # --- Step 2: Build Exact Model ---
-    # (Copying the model setup from previous steps)
-    model = Model(SCIP.Optimizer)
-    # Optional: Enable output to see SCIP processing the primal solution
-    # set_attribute(model, "display/verblevel", 4) 
-
-    n = data.n
-    K = data.K
-
-    @variable(model, x[1:n, 1:K], Bin)
-    @variable(model, y[i=1:n, j=i+1:n], Bin)
-
-    @objective(model, Min, sum(data.distances[i, j] * y[i, j] for i in 1:n for j in i+1:n))
-
-    # Standard Constraints (Assignment, Capacity, Linking)
-    for i in 1:n
-        @constraint(model, sum(x[i, k] for k in 1:K) == 1)
-    end
-    for k in 1:K
-        @constraint(model, sum(data.w_nominal[i] * x[i, k] for i in 1:n) <= data.B)
-    end
-    for i in 1:n, j in i+1:n, k in 1:K
-        @constraint(model, y[i, j] >= x[i, k] + x[j, k] - 1)
-    end
-    
-    # --- Step 3: INJECT WARM START ---
-    if !isempty(h_partition)
-        println("Injecting heuristic solution into SCIP...")
+        if result_count(model) >=1
+            obj_val = objective_value(model)
         
-        # 3a. Set starting values for X (Node Assignments)
-        for i in 1:n
-            assigned_k = h_partition[i]
-            for k in 1:K
-                # If heuristic put node i in k, set to 1.0, else 0.0
-                set_start_value(x[i, k], (k == assigned_k) ? 1.0 : 0.0)
+            # Build a simple dictionary for the partition map
+            # partition_map[i] = k
+            partition_map = zeros(Int,n)
+            for i in 1:n
+                for k in 1:K
+                    if value(x[i, k]) > 1 - 1e-2
+                        partition_map[i] = k
+                    end
+                end
             end
+            return ResultatAlgorithme(
+                "FEASIBLE", 
+                objective_value(model),
+                objective_bound(model),
+                (objective_value(model) - objective_bound(model))/ objective_value(model),
+                solve_time(model),
+                partition_map
+                )
         end
 
-        # 3b. Set starting values for Y (Edge connections)
-        # SCIP checks feasibility strictly, so we must help it by setting Y too.
-        for i in 1:n
-            for j in (i+1):n
-                # Are they in the same group in the heuristic?
-                is_connected = (h_partition[i] == h_partition[j])
-                set_start_value(y[i, j], is_connected ? 1.0 : 0.0)
-            end
-        end
+
+        return ResultatAlgorithme(
+                "NOTFOUND", 
+                Inf,
+                -Inf,
+                NaN64,
+                time_limit,
+                []
+                )
     end
-
-    # --- Step 4: Solve ---
-    println("Starting Exact Solver...")
-    optimize!(model)
-
-    # Return results
-    status = termination_status(model)
-    obj_val = has_values(model) ? objective_value(model) : Inf
-    
-    final_partition = Dict{Int, Int}()
-    if has_values(model)
-        for i in 1:n, k in 1:K
-            if value(x[i, k]) > 0.5
-                final_partition[i] = k
-            end
-        end
-    end
-
-    return status, obj_val, final_partition
 end
+
+
+

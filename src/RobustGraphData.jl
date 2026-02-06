@@ -1,8 +1,3 @@
-module RobustGraphData
-
-using LinearAlgebra
-
-
 
 """
     ProblemData
@@ -123,13 +118,3 @@ function load_instance(filename::String)
 
     return ProblemData(n, K, B, L, W, w_v, W_v, lh, dist_matrix, coords)
 end
-
-include("staticResolution.jl")
-include("plotPartition.jl")
-
-export ProblemData
-export load_instance
-export solve_static_problem_direct
-export plot_partition_result
-
-end 
