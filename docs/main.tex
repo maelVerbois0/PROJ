@@ -609,8 +609,8 @@ La méthode de génération de colonnes surpasse les approches compactes sur les
     \item L'heuristique de pricing permet de générer de nombreuses colonnes pertinentes très rapidement.
 \end{itemize}
 Malheureusement la fermeture de l'instance nécessite la résolution de plusieurs instances du problèmes de pricing à l'exactitude ce qui est très couteux (voir impossible pour les plus grosses instances). La limite de temps de 300s sur la méthode ne lui permet pas de converger et on voit une net baisse de la qualité de la borne inférieure au fur et à mesure que les instances grossissent. 
-Ils restent donc plus pertinent pour la plupart des instances de comparer la valeur de l'objectif obtenue avec la borne robuste obtenue par la relaxation par pseudo-clique.
-Néanmoins, sous réserve de pouvoir fermer l'instance, les bornes renvoyées par génération de colonnes sont plus intéressantes que les bornes combinatoires établient avant
+Il reste donc plus pertinent pour la plupart des instances de comparer la valeur de l'objectif obtenue avec la borne robuste obtenue par la relaxation par pseudo-clique.
+Néanmoins, sous réserve de pouvoir fermer l'instance, les bornes renvoyées par génération de colonnes sont plus intéressantes que les bornes combinatoires établies avant
 \subsubsection*{Quelques Résultats}
 \input{tables/tableauGenerationColonnesResume}
 \subsubsection{Méthode Relaxed And Repair}
@@ -619,7 +619,7 @@ Comme mentionné on peut utiliser la méthode heuristique de peuplement de colon
     \item Plus rapide sur la plupart des instances
     \item Avec garantie de performance
 \end{itemize}
-C'est cette méthode qui obtient les meilleurs résultats, cependant elle a eu un budget de temps plus élevé.
+C'est cette méthode qui obtient les meilleurs résultats, cependant elle a eu un budget de temps légèrement plus élevé.
 %Tableau de comparaison entre génération de colonnes et heuristique relaxed and repair 
 \subsubsection*{Quelques Résultats}
 \input{tables/tableauHeurvsLbResume}
