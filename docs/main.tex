@@ -3,6 +3,9 @@
 \usepackage[T1]{fontenc}
 \usepackage{amsmath, amssymb, amsthm}
 \usepackage{geometry}
+\usepackage{float}
+\usepackage{algorithm}
+\usepackage{algorithmic}
 \geometry{a4paper, margin=2.5cm}
 
 % Notations du projet
@@ -278,4 +281,365 @@ En notant $N=|V|$ (sommets) et $M=|E|$ (arêtes), le modèle comporte exactement
     \item \textbf{Contraintes :} $NK + MK + N + M + K$.
 \end{itemize}
 Comme $K \leq N$, la taille du problème reste polynomiale.
+
+\section{Résolution Numérique et Analyse}
+
+Cette section présente l'architecture logicielle développée, les stratégies de bornes inférieures pour évaluer la qualité des solutions, ainsi qu'une comparaison des méthodes de résolution exactes et heuristiques. On trouvera en annexe les résultats pour toutes les instances ainsi qu'une visualisation des solutions statiques et robustes trouvées. 
+Les stratégies sont les suivantes :
+\begin{itemize}
+    \item Méthode de résolution par plans coupants
+    \item Méthode par Branch and Cut et LazyCallBack
+    \item Méthode par Dualisation des sous problèmes robustes
+    \item Méthode heuristique par Génération de Colonnes
+    \item Méthode heuristique Relaxed-Repair et comparaison avec bornes inférieures combinatoires
+\end{itemize}
+
+\subsection{Architecture Logicielle et Protocoles}
+
+L'ensemble des algorithmes a été implémenté en langage \texttt{Julia}, utilisant le package \texttt{JuMP} pour la modélisation mathématique et le solveur \texttt{Gurobi} pour la résolution des PLNE. Toutes les solutions ont été testées avec un temps limite de 300s.
+
+ Une architecture modulaire centrée sur un module principal nommé \texttt{Solver} a été choisi. Ce choix de conception permet de découpler la définition des données du problème des stratégies de résolution.
+\begin{itemize}
+    \item \textbf{Structure de Données (\texttt{ProblemData}) :} Encapsule de manière immuable les paramètres du graphe $G=(V,E)$, les matrices de distances nominales,les poids des sommets ainsi que les paramètres d'incertitude.
+    \item \textbf{Interface :} Une interface commune permet d'appeler indifféremment les méthodes de plans coupants, la dualisation ou la génération de colonnes. Cela garantit que toutes les méthodes bénéficient des mêmes routines de chargement d'instance et de vérification de solution.
+    \item \textbf{Gestion des Résultats :} Chaque algorithme renvoie une structure standardisée \texttt{ResultatAlgorithme} contenant le statut final, la meilleure solution entière trouvée ($UB$), la meilleure borne inférieure prouvée ($LB$), le gap relatif et le temps de calcul.
+\end{itemize}
+
+On trouvera dans le repo github un tutoriel indiquant la marche à suivre pour faire fonctionner le code.
+
+\subsection{Analyse du Problème Statique}
+
+Avant d'aborder la robustesse, l'analyse du problème statique révèle des difficultés intrinsèques liées à la modélisation choisie.
+Si les petites instances du PLNE ($|V| < 20$) sont résolues instantanément par Gurobi, les instances de taille moyenne ($|V| \ge 30$) présentent une convergence lente voir inexistante. En cause, l'incapacité du solveur à trouver une borne inférieure de qualité permettant de fermer l'instance.
+
+Deux facteurs principaux expliquent ce phénomène :
+\begin{enumerate}
+    \item \textbf{Symétries :} Toute permutation des indices des sous-ensembles $V_1, \dots, V_K$ représente la même solution physique. Bien que des contraintes de rupture de symétrie (ex: classer les partitions par taille ou par index du plus petit élément) aient été testées, elles alourdissent le modèle sans arriver à faire mieux que les méthodes natives du solveur.
+    \item \textbf{Faiblesse de la Relaxation Continue :} La relaxation linéaire du modèle compact est faible. Il est "peu coûteux" pour le solveur de satisfaire les contraintes d'affectation $\sum_k x_{ik} = 1$ en fixant $x_{ik} = 1/K$ pour tout $k$, tout en maintenant les variables de lien $y_{ij}$ à 0, minimisant ainsi artificiellement l'objectif.
+    Il a été tenté d'ajouter des inégalités valides (inégalités triangulaires) de la forme :
+    $$ y_{ij} + y_{jk} - y_{ik} \le 1 \quad \forall i,j,k \in V $$
+    Ces contraintes, qui imposent la transitivité de la relation "être dans la même partie" (si $i$ et $j$ sont liés et que $j$ et $k$ sont liés, alors $i$ et $k$ doivent l'être), renforcent l'enveloppe convexe. Cependant, leur nombre en $O(|V|^3)$ alourdit considérablement le modèle sans parvenir à compenser efficacement la tendance de la relaxation à fractionner les variables d'affectation.
+\end{enumerate}
+On s'attend donc à deux phénomènes pour toutes les méthodes:
+\begin{itemize}
+    \item Un allongement significatif du temps de calcul lorsque $K$ augmente lié à l'augmentation des symétries et une augmentation de la combinatoire du problème (plus de partionnement possible).
+    \item Une relaxation de moins bonne qualité et donc des gaps plus mauvais pour les instances avec des valeurs de $K$ plus grande.
+\end{itemize}
+\subsubsection*{Quelques résultats}
+\input{tables/tableauStatiqueResume}
+\subsection{Bornes Inférieures}
+
+Face à la faiblesse de la borne inférieure fournie par le MIP, on décide dans un premier temps d'obtenir des bornes inférieures valides par des méthodes spécifiques pour certifier la qualité des solutions futures. On peut commencer par remarquer que comme le scénario statique appartient à l'ensemble des scénarios du robuste, toute borne inférieure pour le statique est une borne inférieure pour le robuste (relaxation des contraintes de poids robustes et définition du max sur les scénario de coût.
+
+\subsubsection{Borne Combinatoire par Cardinalité}
+
+Cette méthode repose sur une propriété structurelle simple : pour partitionner un ensemble de sommets en $K$ sous-ensembles, le nombre total d'arêtes internes est minimisé lorsque la répartition des effectifs est la plus équilibrée possible.
+
+\paragraph{Preuve par argument d'échange.}
+Considérons une partition contenant deux sous-ensembles de tailles respectives $n_a$ et $n_b$. Le nombre d'arêtes internes à ces deux groupes est la somme des paires distinctes possibles dans chacun d'eux.
+Supposons qu'il existe un déséquilibre significatif entre ces deux groupes, tel que :
+$$ n_a \ge n_b + 2 $$
+Si l'on transfère un sommet du groupe le plus grand (taille $n_a$) vers le groupe le plus petit (taille $n_b$), la variation du nombre total d'arêtes internes $\Delta$ correspond à la différence entre les liens créés dans le nouveau groupe et les liens supprimés dans l'ancien :
+$$ \Delta = n_b - (n_a - 1) $$
+Puisque par hypothèse $n_a > n_b + 1$, cette variation $\Delta$ est strictement négative.
+Par conséquent, tant que la différence de taille entre deux parties est supérieure ou égale à 2, il est toujours possible de réduire le nombre total d'arêtes par un simple transfert. L'optimum est donc atteint uniquement lorsque les tailles des cliques sont quasi-identiques (c'est-à-dire égales à $\lfloor n/K \rfloor$ ou $\lceil n/K \rceil$).
+
+\paragraph{Calcul de la borne.}
+Une fois ce nombre minimal théorique d'arêtes déterminé, noté $M_{min}$, nous pouvons ignorer la structure du graphe et nous concentrer uniquement sur les coûts. La borne inférieure valide $LB_{card}$ est obtenue en sommant simplement les poids des $M_{min}$ arêtes les plus légères du graphe $G$.
+
+\subsubsection{Relaxation par partition en pseudo-clique}
+
+La borne par cardinalité présentée précédemment ne respecte pas la structure locale des cliques : elle sélectionne les arêtes les moins chères sans vérifier si elles sont cohérentes pour former une partition et des cliques. Pour obtenir une borne plus forte, on exploite une propriété locale d'une clique : dans une clique de taille $t$, chaque sommet possède nécessairement un degré égal à $t-1$.
+
+\subsubsection*{Cas Statique} 
+Nous définissons une \textit{pseudo-clique} de taille $t$ comme un ensemble de $t$ sommets auxquels on impose un degré égal à $t-1$, sans exiger la connectivité complète (les arêtes peuvent relier ces sommets à n'importe quels autres du graphe).
+Dans le cas statique, le problème relaxé revient à choisir la taille $t$ de la pseudo-clique à laquelle chaque sommet appartient afin de minimiser le coût total des arêtes, sous la contrainte que les degrés soient cohérents.
+On peut l'écrire sous la forme d'un PLNE.
+
+Soit $z_{it} \in \{0,1\}$ valant 1 si le sommet $i$ est assigné à une pseudo-clique de taille $t$, $x_{ij \in \{0,1\}}$ valant 1 si l'arête ij est sélectionnée ou non,  Le modèle s'écrit :
+\begin{align*}
+    \min \quad & \sum_{\{i,j\} \in E} l_{ij} x_{ij} \\
+    \text{s.c.} \quad & \sum_{j \neq i} x_{ij} = \sum_{t=1}^n (t-1) z_{it} \quad \forall i \in V \\
+    & \sum_{t=1}^n z_{it} = 1 \quad \forall i \in V
+\end{align*}
+Cette relaxation est bien une borne inférieure car toute partition en vraies cliques respecte ces contraintes de degrés.
+Un avantage majeur de cette relaxation est que l'on peut ajouter les contraintes spécifiques de notre problème sur le budget des partitions et leur nombre en adaptant le modèle, tout en évitant les contraintes quadratiques liant les arêtes et les sommets. En introduisant une variable entière $N_t$ représentant le nombre de pseudo-cliques de taille $t$ utilisées, nous pouvons lier l'affectation des sommets à la capacité $B$ et fixer le nombre de partition à $K$ :
+
+Le Programme Linéaire en Nombres Entiers complet s'écrit :
+\begin{align*}
+    \min \quad & \sum_{\{i,j\} \in E} l_{ij} x_{ij} \\
+    \text{s.c.} \quad & \sum_{j \neq i} x_{ij} = \sum_{t=1}^n (t-1) z_{it} & \forall i \in V \quad \text{(Contrainte de Degrés)} \\
+    & \sum_{t=1}^n z_{it} = 1 & \forall i \in V \quad \text{(Affectation Unique)} \\
+    & \sum_{i \in V} z_{it} = t \cdot N_t & \forall t \in \{1,\dots,n\} \quad \text{(Cohérence Taille)} \\
+    & \sum_{t=1}^n N_t = K & \text{(Nombre de Partitions)} \\
+    & \sum_{i \in V} w_i z_{it} \le B \cdot N_t & \forall t \in \{1,\dots,n\} \quad \text{(Capacité Relaxée)} \\
+    & x_{ij}, z_{it} \in \{0,1\}, N_t \in \mathbb{N}
+\end{align*}
+
+\subsubsection*{Extension au Cas Robuste.}
+Pour le problème robuste, nous enrichissons ce modèle en intégrant les ensembles d'incertitude $U^1$ (distances) et $U^2$ (poids).
+On remarque que dans notre modélisation, il est impossible de distinguer les pseudo-cliques de même taille les unes des autres. On ne peut donc pas calculer aisément le coût robuste d'une pseudo-clique individuelle. Néanmoins, on peut calculer le coût robuste de l'ensemble des pseudo-cliques de taille $t$ pour un $t$ fixé en choisissant le pire scénario pour l'ensemble de ces pseudo-cliques (et non le pire par pseudo-clique).
+
+C'est une relaxation du problème robuste car nous remplaçons la contrainte locale "chaque cluster robuste $k$ doit respecter la capacité $B$" par une contrainte agrégée "la somme des poids des $N_t$ clusters robuste de taille $t$ ne doit pas dépasser la capacité totale $N_t \times B$". Si une solution respecte les contraintes robustes individuelles, elle respecte la contrainte globale, c'est une relaxation.
+
+Nous introduisons les variables duales pour gérer l'incertitude : $\sigma^1, \mu_{ij}^1$ pour les distances (budget global $L$) et $S^2_t, \Lambda^2_{it}$ pour les poids (budget local $W$ agrégé par taille).
+
+Le Programme Linéaire Mixte complet s'écrit :
+\begin{align*}
+    \min \quad & \sum_{\{i,j\} \in E} l_{ij} x_{ij} + L \sigma^1 + \sum_{\{i,j\} \in E} 3 \mu_{ij}^1 \\
+    \text{s.c.} \quad 
+    & \sum_{j \neq i} x_{ij} = \sum_{t=1}^n (t-1) z_{it} & \forall i \in V \quad \text{(Degrés)} \\
+    & \sum_{t=1}^n z_{it} = 1 & \forall i \in V \quad \text{(Affectation)} \\
+    & \sum_{i \in V} z_{it} = t \cdot N_t & \forall t \in \{1,\dots,n\} \quad \text{(Cohérence)} \\
+    & \sum_{t=1}^n N_t = K & \text{(Total Partitions)} \\
+    & \sigma^1 + \mu_{ij}^1 \ge (\hat{l}_i + \hat{l}_j) x_{ij} & \forall \{i,j\} \in E \quad \text{(Dualité Distances)} \\
+    & \sum_{i \in V} w_i z_{it} + W S^2_t + \sum_{i \in V} W_i \Lambda^2_{it} \le B \cdot N_t & \forall t \in \{1,\dots,n\} \quad \text{(Capacité Robuste Agrégée)} \\
+    & S^2_t + \Lambda^2_{it} \ge w_i z_{it} & \forall i \in V, \forall t \quad \text{(Dualité Poids)} \\
+    & x_{ij}, z_{it} \in \{0,1\}, N_t \in \mathbb{N} \\
+    & \sigma^1, \mu^1, S^2, \Lambda^2 \ge 0
+\end{align*}
+Ce modèle capture simultanément la structure nécessaire (degrés) et le coût de la robustesse, fournissant une meilleure borne $LB_{deg}$ que précedemment.
+\subsubsection*{Quelques Résultas}
+\input{tables/tableauBornesResume}
+On utilisera ensuite ces bornes inférieures pour juger de la qualité des solutions et/ou des bornes inférieures trouvées par les différentes méthodes.
+
+\subsection{Comparaison des Méthodes Robustes Compactes}
+
+On compare les trois approches exactes demandées pour résoudre le problème robuste.
+
+\subsubsection{Plans Coupants Naïfs}
+Cette méthode résout itérativement le problème maître statique. À chaque optimum entier trouvé, on vérifie si les contraintes robustes sont violées par les sous-problèmes de séparation (SP1 pour les distances, SP2 pour les poids). Si oui, on ajoute une coupe et on relance la résolution.
+\newline
+\subsubsection*{Pseudo code}
+\begin{algorithm}
+\caption{Plans Coupants Naïfs}
+\begin{algorithmic}[1]
+\REQUIRE Graphe $G$, Paramètres $K, B, L, W$
+\ENSURE Solution Optimale Robuste $(\hat{x}, \hat{y})$
+
+\STATE Initialiser le Problème Maître ($MP$) avec contraintes statiques et scénarios nominaux
+\WHILE{Non Convergé}
+    \STATE $(\hat{x}, \hat{y}, \hat{\eta}) \leftarrow$ Résoudre le $MP$ à l'optimalité (MIP complet)
+    
+    \STATE Calculer le coût réel maximum via SP1 (Distances) et SP2 (Poids)
+    
+    \IF{Violation détectée (Coût Réel $> \hat{\eta}$ \textbf{OU} Poids $> B$)}
+        \STATE Ajouter les contraintes de coupe correspondantes au $MP$
+    \ELSE
+        \STATE \textbf{Arrêt :} La solution courante est robuste optimale
+        \RETURN $(\hat{x}, \hat{y})$
+    \ENDIF
+\ENDWHILE
+\end{algorithmic}
+\end{algorithm}
+\subsubsection*{Analyse } Cette méthode s'est révélée inefficace. Le redémarrage constant du solveur perd l'information de l'arbre de recherche précédent. De plus, elle ne fournit pas de borne inférieure valide ni de solution candidate avant la convergence totale. Elle n'arrive à trouver l'optimum que pour 5 solutions.
+\subsubsection*{Quelques Résultats}
+\input{tables/tableauCuttingPlaneComplet}
+\subsubsection{Branch-and-Cut (LazyCallback)}
+L'implémentation via \texttt{LazyConstraintCallback} permet d'intégrer la génération de coupes au sein même de l'arbre de recherche de Gurobi. Contrairement à l'approche naïve, le solveur n'est pas redémarré : les coupes de robustesse ne sont ajoutées que lorsque le solveur trouve une solution entière candidate potentielle, agissant comme un filtre de faisabilité dynamique.
+\subsubsection*{Pseudo code}
+\begin{algorithm}[H]
+\caption{Branch-and-Cut (LazyCallback)}
+\begin{algorithmic}[1]
+\REQUIRE Graphe $G$, Paramètres $K, B, L, W$
+\ENSURE Solution Optimale Robuste $(\hat{x}, \hat{y})$
+
+\STATE Initialiser le Modèle ($M$) avec contraintes statiques uniquement
+\STATE Définir la fonction \textbf{Callback}$(x^*, y^*, \eta^*)$:
+    \STATE \quad Calculer le coût réel via SP1 (Distances) et le poids réel via SP2 (Poids)
+    \IF{Violation détectée}
+        \STATE \quad Ajouter la contrainte de coupe correspondante (Lazy Constraint) au pool global
+        \STATE \quad Rejeter la solution candidate
+    \ENDIF
+
+\STATE Configurer le solveur pour utiliser \textbf{Callback} aux nœuds entiers
+\STATE $(\hat{x}, \hat{y}) \leftarrow$ Lancer l'optimisation (Branch-and-Bound ininterrompu)
+\RETURN $(\hat{x}, \hat{y})$
+\end{algorithmic}
+\end{algorithm}
+
+\subsubsection*{Analyse}
+Bien que supérieure à l'approche naïve (car elle conserve l'arbre de recherche), cette méthode souffre de l'ajout de coupe aux noeuds entier et des difficultés inhérentes du problème statique, ne renvoie ni de bornes inférieures intéressantes ni de solutions heuristiques de bonnes qualitées. 
+\subsubsection*{Quelques Résultats}
+\input{tables/tableauBranchnCutResume}
+
+\subsubsection{Dualisation Compacte}
+En remplaçant les sous-problèmes de maximisation (le "pire cas") par leurs duaux de minimisation directement dans le modèle maître, nous obtenons un Programme Linéaire Mixte (MIP) dont on a tiré notre formulation duale compacte (cf question 4-g)
+
+\subsubsection*{Analyse}
+C'est l'approche la plus robuste parmi les méthodes exigées. En fournissant toutes les contraintes simultanément, Gurobi peut appliquer ses propres heuristiques de présolution et ses coupes génériques sur l'ensemble du problème, cela améliore la qualité du gap (qui n'est cependant pas compétitif avec les méthodes combinatoires pour la plupart des instances), la vitesse de résolution et la qualité des solutiosn renvoyées.
+\subsubsection*{Quelques résultats}
+\input{tables/tableauRobustDualisationResume}
+\subsection{Méthodes Heuristiques : Génération de Colonnes}
+Face aux limites des modèles compacts, dont la relaxation continue fournit des bornes inférieures de mauvaise qualité, on implémente une heuristique de génération de colonnes basée sur la reformulation de Dantzig-Wolfe (non-compacte). Cette approche vise à obtenir une relaxation plus forte (borne inférieure améliorée) et à casser les symétries inhérentes au modèle initial.
+\subsubsection*{Décomposition de Dantzig-Wolfe}
+
+Le problème de partitionnement robuste présente une structure bloc-angulaire naturelle.
+\begin{itemize}
+    \item Les contraintes de partitionnement ($\sum_k x_{ik} = 1$) sont des contraintes "liantes" qui couplent les décisions.
+    \item Les contraintes de capacité robuste et de structure interne des clusters sont indépendantes pour chaque sous-ensemble $k$.
+\end{itemize}
+
+En considérant le modèle robuste dualisé (cf. Section 2), nous pouvons isoler le polytope $\mathcal{P}$ définissant un cluster robuste admissible (un sous-ensemble de sommets respectant la capacité robuste $U^2$). D'après le théorème de Minkowski-Weyl, tout point de ce polytope peut s'exprimer comme une combinaison convexe de ses points extrêmes (les clusters valides).
+Comme les $K$ partitions sont identiques (mêmes contraintes, mêmes coûts), nous agrégeons ces sous-problèmes identiques.
+Le modèle se reformule alors en choisissant $K$ colonnes parmi l'ensemble $\Omega$ de toutes les partitions admissibles possibles.
+
+\subsubsection*{Formulation du Problème Maître Restreint (RMP)}
+
+Soit $\Omega$ l'ensemble des colonnes (clusters robustes admissibles) générées à une itération donnée.
+Pour chaque colonne $p \in \Omega$, nous définissons :
+\begin{itemize}
+    \item $c_p^{nom} = \sum_{\{i,j\} \in p} l_{ij}$ : le coût nominal des arêtes internes au cluster.
+    \item $a_{ip} \in \{0,1\}$ : coefficient valant 1 si le sommet $i$ appartient au cluster $p$.
+    \item $e_{ij,p} \in \{0,1\}$ : coefficient valant 1 si l'arête $\{i,j\}$ est interne au cluster $p$.
+\end{itemize}
+
+Les variables globales de robustesse sur les distances ($\sigma^1, \mu_{ij}^1$), liées au budget $L$, restent dans le maître. La variable de décision $\lambda_p \ge 0$ représente la sélection de la colonne $p$.
+
+$$ \min \sum_{p \in \Omega} c_p^{nom} \lambda_p + L \sigma^1 + \sum_{\{i,j\} \in E} 3 \mu_{ij}^1 $$
+$$ \text{s.c.} \quad \sum_{p \in \Omega} a_{ip} \lambda_p = 1 \quad \forall i \in V \quad (\text{dual } \pi_i) $$
+$$ \sum_{p \in \Omega} \lambda_p = K \quad (\text{dual } \nu) $$
+$$ \sigma^1 + \mu_{ij}^1 - \sum_{p \in \Omega} (\hat{l}_i + \hat{l}_j) e_{ij,p} \lambda_p \ge 0 \quad \forall \{i,j\} \in E \quad (\text{dual } \alpha_{ij}) $$
+$$ \lambda_p \ge 0, \quad \sigma^1 \ge 0, \quad \mu_{ij}^1 \ge 0 $$
+
+La contrainte liée aux variables duales $\alpha_{ij}$ assure le lien entre les arêtes sélectionnées par les colonnes et le coût robuste global.
+
+\subsubsection{Le Sous-Problème (Pricing) et Coût Réduit}
+
+Le problème de pricing consiste à trouver une nouvelle colonne $p^*$ (définie par les variables binaires de sommets $z_i$ et d'arêtes $y_{ij}$) appartenant à l'ensemble des clusters robustes valides, qui minimise le coût réduit $\bar{c}$.
+En isolant les termes associés à $\lambda_p$ dans le dual du RMP, l'expression du coût réduit à minimiser est :
+
+$$ \bar{c}(z,y) = \underbrace{\sum_{\{i,j\} \in E} l_{ij} y_{ij}}_{\text{Coût nominal}} - \sum_{i \in V} \pi_i z_i - \nu + \sum_{\{i,j\} \in E} \alpha_{ij} (\hat{l}_i + \hat{l}_j) y_{ij} $$
+
+Ce qui se réécrit en regroupant les termes sur les arêtes :
+$$ \bar{c}(z,y) = \sum_{\{i,j\} \in E} \left( l_{ij} + \alpha_{ij}(\hat{l}_i + \hat{l}_j) \right) y_{ij} - \sum_{i \in V} \pi_i z_i - \nu $$
+
+\textbf{Contraintes du Pricing :}
+Le cluster doit former une clique locale (les arêtes suivent les sommets) et respecter la capacité robuste locale ($U^2$) :
+\begin{itemize}
+    \item $y_{ij} \ge z_i + z_j - 1$ (Linéarisation)
+    \item $\text{PoidsNominal}(z) + \text{CoûtRobuste}(U^2, z) \le B$
+\end{itemize}
+
+\subsubsection{Algorithme de Résolution et Calcul de Borne}
+
+La résolution exacte du pricing est un problème NP-difficile (proche du \textit{Knapsack Problem} quadratique). Pour garantir l'efficacité de la méthode, nous avons implémenté une stratégie de résolution en cascade: dans un premier un temps on lance une heuristique gloutonne. Si elle échoue à renvoyer une colonne négative on lance Gurobi avec une time -limit très courte. S'il échoue on utilise le PLNE et Gurobi pour faire une résolution exacte.
+
+Une propriété fondamentale de la décomposition nous permet de calculer une borne inférieure valide ($LB_{valid}$) à chaque itération ou l'on calcule le cout réduit de plus petite valeur 
+$$ LB_{valid} = Z_{RMP} + K \times \min(0, \bar{c}_{min}) $$
+
+\begin{algorithm}[H]
+\caption{Génération de Colonnes avec Pricing Hybride}
+\begin{algorithmic}[1]
+\REQUIRE Graphe $G$, Paramètres $K, B, L, W$
+\ENSURE Borne Inférieure ($LB$) et Solution Entière ($UB$)
+
+\STATE Initialiser RMP avec une population de colonnes (Heuristique Géométrique)
+\STATE $LB_{best} \leftarrow -\infty$
+
+\WHILE{Temps < TimeLimit}
+    \STATE Résoudre la relaxation linéaire du RMP $\to$ Duaux $\pi, \nu, \alpha$
+    \STATE $Z_{RMP} \leftarrow$ Objectif du RMP
+    \STATE $\text{ColonneTrouvee} \leftarrow \text{Faux}$
+
+    \STATE \textit{// Étape 1 : Pricing Heuristique (Rapide)}
+    \STATE $(\text{Col}, \bar{c}) \leftarrow \text{HeuristiqueGlouton} + \text{RechercheLocale}(\pi, \nu, \alpha)$
+    \IF{$\bar{c} < -\epsilon$}
+        \STATE Ajouter Col au RMP, $\text{ColonneTrouvee} \leftarrow \text{Vrai}$
+    \ENDIF
+
+    \IF{Non $\text{ColonneTrouvee}$}
+        \STATE \textit{// Étape 2 : Pricing MIP Restreint (Moyen)}
+        \STATE $(\text{Col}, \bar{c}) \leftarrow \text{SolveMIP}(\pi, \nu, \alpha)$ avec \textbf{TimeLimit = 2s}
+        \IF{$\bar{c} < -\epsilon$}
+            \STATE Ajouter Col au RMP, $\text{ColonneTrouvee} \leftarrow \text{Vrai}$
+        \ENDIF
+    \ENDIF
+
+    \IF{Non $\text{ColonneTrouvee}$}
+        \STATE \textit{// Étape 3 : Pricing Exact (Lent - Preuve d'optimalité)}
+        \STATE $(\text{Col}, \bar{c}) \leftarrow \text{SolveMIP}(\pi, \nu, \alpha)$ sans limite
+        \IF{$\bar{c} < -\epsilon$}
+            \STATE Ajouter Col au RMP
+                \STATE \textit{// Mise à jour de la Borne Inférieure}
+                \STATE $LB_{curr} = Z_{RMP} + K \times \bar{c}$
+                \STATE $LB_{best} = \max(LB_{best}, LB_{curr})$
+        \ELSE
+            \STATE \textbf{Break} (Optimalité de la relaxation atteinte)
+        \ENDIF
+    \ENDIF
+    
+\ENDWHILE
+
+\STATE \textit{// Phase Finale : obtention d'un solution entière}
+\STATE Résoudre le RMP avec $\lambda_p \in \{0,1\}$ sur les colonnes générées
+\RETURN $LB_{best}$, Solution Entière
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Stratégie d'Initialisation et Heuristique de Recherche Locale}
+
+Pour amorcer efficacement le problème maître (RMP) de la génération de colonnes avec des partitions pertinentes, une stratégie heuristique en deux phases a été mis en place exploitant la géométrie du graphe.
+
+\subsubsection*{Phase 1 : Initialisation Géométrique (K-Means)}
+Puisque les coûts $l_{ij}$ correspondent à des distances euclidiennes, une partition minimisant la somme des distances intra-classes est  proche d'un clustering K-mean (qui minimise la norme au carré au lieu de la norme).On initialise la solution en appliquant l'algorithme des $K$-moyennes sur les coordonnées des sommets. Cette approche fournit quasi-instantanément une partition géométriquement cohérente, bien que potentiellement infaisable vis-à-vis des contraintes de capacité robustes $B$.
+
+\subsubsection*{Phase 2 : Réparation Relaxée par Score Composite}
+Pour recouvrer l'admissibilité tout en optimisant le coût, on utilise une recherche locale basée sur une relaxation dynamique. On définit un score composite pénalisant la violation des capacités robustes :
+
+$$ \text{CoûtRobuste} + \lambda \times \sum_{k=1}^K \max(0, \text{PoidsRobuste} - B) $$
+
+L'algorithme procède par descente locale en évaluant deux types de voisinages
+\begin{itemize}
+    \item \textbf{Shift :} Déplacement d'un sommet $u$ d'une partition $V_i$ vers une partition $V_j$.
+    \item \textbf{Swap :} Échange de deux sommets $u \in V_i$ et $v \in V_j$.
+\end{itemize}
+
+Le paramètre de pénalité $\lambda$ est ajusté dynamiquement : il est augmenté lorsque la solution est infaisable (pour forcer le respect de $B$) et diminué lorsque la solution est admissible (pour privilégier la minimisation du coût $U^1$)
+
+\paragraph{Utilisation en tant que solveur heuristique.}
+Au-delà de l'initialisation de la génération de colonnes, cette méthode peut aussi être utilisé comme un solveur heuristique indépendants. Comparée aux bornes inférieures  calculées dans les sections précédentes, cette méthode sera analysée dans la section suivante.
+\subsection{Analyse}
+
+La méthode de génération de colonnes surpasse les approches compactes sur les instances difficiles.
+\begin{itemize}
+    \item La relaxation continue du RMP fournit une borne inférieure ($LB_{colgen}$) plus forte que celle du modèle compact.
+    \item L'heuristique de pricing permet de générer de nombreuses colonnes pertinentes très rapidement.
+\end{itemize}
+Malheureusement la fermeture de l'instance nécessite la résolution de plusieurs instances du problèmes de pricing à l'exactitude ce qui est très couteux (voir impossible pour les plus grosses instances). La limite de temps de 300s sur la méthode ne lui permet pas de converger et on voit une net baisse de la qualité de la borne inférieure au fur et à mesure que les instances grossissent. 
+Ils restent donc plus pertinent pour la plupart des instances de comparer la valeur de l'objectif obtenue avec la borne robuste obtenue par la relaxation par pseudo-clique.
+Néanmoins, sous réserve de pouvoir fermer l'instance, les bornes renvoyées par génération de colonnes sont plus intéressantes que les bornes combinatoires établient avant
+\subsubsection*{Quelques Résultats}
+\input{tables/tableauGenerationColonnesResume}
+\subsubsection{Méthode Relaxed And Repair}
+Comme mentionné on peut utiliser la méthode heuristique de peuplement de colonnes et comparer la solution obtenue à une des bornes inférieures combinatoires pour obtenir une méthode qui est :
+\begin{itemize}
+    \item Plus rapide sur la plupart des instances
+    \item Avec garantie de performance
+\end{itemize}
+C'est cette méthode qui obtient les meilleurs résultats, cependant elle a eu un budget de temps plus élevé.
+%Tableau de comparaison entre génération de colonnes et heuristique relaxed and repair 
+\subsubsection*{Quelques Résultats}
+\input{tables/tableauHeurvsLbResume}
+\subsection{Comparaison de toutes les méthodes}
+%Tableau avec cout de la robustessse gap et temps pour toutes les méthodes
+\input{tables/tableauGeneralComplet}
+\section{Conclusion}
+
+Ce projet a permis de tirer différents enseignements quant à la manière de traiter ce problème de partitionement de graphe.
+\begin{itemize}
+    \item Premièrement, les formulations compactes atteignent rapidement un plafond de performance. Si la \textbf{dualisation} du problème robuste s'est avérée supérieure aux méthodes itératives de plans coupants (naïfs ou via \texttt{LazyCallback}), elle reste limitée par la faiblesse de la relaxation continue et les symétries du modèle, ne permettant pas de résoudre efficacement des instances au-delà de 50 sommets.
+    \item Deuxièmement, une heuristique non compacte comme la génération de colonnes permet de résoudre les problèmes des méthodes compactes mais échoue à converger sur les plus grosses instances dûe à la difficulté du problème de Pricing 
+    \item Finalement, la méthode heuristique Relaxed and Repair avec Gap Combinatoire s'impose comme la stratégie la plus performante. Elle trouve les meilleures solutions, le meilleur gap en le moins de temps.
+\end{itemize}
+
+
+
+
+Néanmoins plusieurs pistes d'amélioration de l'algorithme de génération de colonnes mériteraient d'être explorées pour le rendre compétitif :
+\begin{itemize}
+    \item \textbf{Amélioration du Pricing :} Le sous-problème étant lui-même NP-difficile, l'implémentation d'heuristiques plus sophistiquées (métaheuristiques, programmation dynamique, relaxation) pour la résolution du \textit{pricing} permettrait d'accélérer la convergence en générant des colonnes de meilleure qualité plus rapidement.
+    \item \textbf{Inégalités Valides :} Pour combler le gap d'intégralité restant sur les instances les plus difficiles (K grands et non fermeture de la génération de colonnes), l'ajout d'inégalités valides spécifiques au problème maître  serait nécessaire pour renforcer la formulation.
+    \item \textbf{Utilisation dans un Brach and Price} pour chercher des solutions exactes
+\end{itemize}
 \end{document}
