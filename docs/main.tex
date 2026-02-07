@@ -6,6 +6,8 @@
 \usepackage{float}
 \usepackage{algorithm}
 \usepackage{algorithmic}
+\usepackage{graphicx}
+\usepackage{subcaption}
 \geometry{a4paper, margin=2.5cm}
 
 % Notations du projet
@@ -642,4 +644,16 @@ Néanmoins plusieurs pistes d'amélioration de l'algorithme de génération de c
     \item \textbf{Inégalités Valides :} Pour combler le gap d'intégralité restant sur les instances les plus difficiles (K grands et non fermeture de la génération de colonnes), l'ajout d'inégalités valides spécifiques au problème maître  serait nécessaire pour renforcer la formulation.
     \item \textbf{Utilisation dans un Brach and Price} pour chercher des solutions exactes
 \end{itemize}
+\newpage
+\appendix
+\section{Reproduction des résultats pour toutes les instances et toutes les méthodes}
+On trouvera en dessous les résultats pour toutes les méthodes et toutes les instances.
+\input{tables/tableauStatiqueComplet.tex}
+\input{tables/tableauCuttingPlaneComplet.tex}
+\input{tables/tableauBranchnCutComplet.tex}
+\input{tables/tableauRobustDualisationComplet.tex}
+\input{tables/tableauGenerationColonnesComplet.tex}
+\input{tables/tableauHeurvsLbComplet.tex}
+\input{figures/annexe_visualisations.tex}
+
 \end{document}
